@@ -1,0 +1,6 @@
+﻿  stdafx.cpp
+  CUDA_1_PC.cpp
+c:\users\kos_a\documents\visual studio 2015\projects\cuda_1_pc\cuda_1_pc\cuda_1_pc.cpp(18): warning C4101: 'c': unreferenced local variable
+  Generating Code...
+  CUDA_1_PC.vcxproj -> c:\users\kos_a\documents\visual studio 2015\Projects\CUDA_1_PC\Debug\CUDA_1_PC.exe
+  CUDA_1_PC.vcxproj -> c:\users\kos_a\documents\visual studio 2015\Projects\CUDA_1_PC\Debug\CUDA_1_PC.pdb (Full PDB)

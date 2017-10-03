@@ -1,0 +1,4 @@
+﻿  CUDA_1_PC.cpp
+c:\users\kos_a\documents\visual studio 2015\projects\cuda_1_pc\cuda_1_pc\cuda_1_pc.cpp(17): warning C4244: 'argument': conversion from 'time_t' to 'unsigned int', possible loss of data
+  CUDA_1_PC.vcxproj -> C:\Users\kos_a\documents\visual studio 2015\Projects\CUDA_1_PC\x64\Debug\CUDA_1_PC.exe
+  CUDA_1_PC.vcxproj -> C:\Users\kos_a\documents\visual studio 2015\Projects\CUDA_1_PC\x64\Debug\CUDA_1_PC.pdb (Full PDB)
