@@ -1,31 +1,35 @@
-//FileName: cudaInfo.cu
-
 #include <stdio.h>
 #include <cuda_runtime_api.h>
 #include <iostream>
+
+int getNumberOfCores(cudaDeviceProp devProp);
+
 
 int main()
 {
 	int deviceCount;
 	cudaDeviceProp deviceProp;
 
-	//Сколько устройств CUDA установлено на PC.
 	cudaGetDeviceCount(&deviceCount);
 
 	printf("Device count: %d\n\n", deviceCount);
 
 	for (int i = 0; i < deviceCount; i++)
 	{
-		//Получаем информацию об устройстве
 		cudaGetDeviceProperties(&deviceProp, i);
 
-		//Выводим иформацию об устройстве
 		printf("Device name: %s\n", deviceProp.name);
-		printf("Total global memory: %d\n", deviceProp.totalGlobalMem);
-		printf("Shared memory per block: %d\n", deviceProp.sharedMemPerBlock);
+		printf("Compute capability: %d.%d\n", deviceProp.major, deviceProp.minor);
+
+		printf("Clock rate: %d Hz\n", deviceProp.clockRate);
+		printf("Multiprocessor count: %d\n", deviceProp.multiProcessorCount);
+		printf("Number of cores: %d\n", getNumberOfCores(deviceProp));
+
+		printf("Total constant memory: %d bytes\n", deviceProp.totalConstMem);
+		printf("Total global memory: %zd bytes\n", deviceProp.totalGlobalMem);
+		printf("Shared memory per block: %d bytes\n", deviceProp.sharedMemPerBlock);
 		printf("Registers per block: %d\n", deviceProp.regsPerBlock);
 		printf("Warp size: %d\n", deviceProp.warpSize);
-		printf("Memory pitch: %d\n", deviceProp.memPitch);
 		printf("Max threads per block: %d\n", deviceProp.maxThreadsPerBlock);
 
 		printf("Max threads dimensions: x = %d, y = %d, z = %d\n",
@@ -37,19 +41,37 @@ int main()
 			deviceProp.maxGridSize[0],
 			deviceProp.maxGridSize[1],
 			deviceProp.maxGridSize[2]);
-
-		printf("Clock rate: %d\n", deviceProp.clockRate);
-		printf("Total constant memory: %d\n", deviceProp.totalConstMem);
-		printf("Compute capability: %d.%d\n", deviceProp.major, deviceProp.minor);
-		printf("Texture alignment: %d\n", deviceProp.textureAlignment);
-		printf("Device overlap: %d\n", deviceProp.deviceOverlap);
-		printf("Multiprocessor count: %d\n", deviceProp.multiProcessorCount);
-
-		printf("Kernel execution timeout enabled: %s\n",
-			deviceProp.kernelExecTimeoutEnabled ? "true" : "false");
 	}
 
 	system("pause");
 
 	return 0;
+}
+
+
+int getNumberOfCores(cudaDeviceProp devProp)
+{
+	int cores = 0;
+	int mp = devProp.multiProcessorCount;
+	switch (devProp.major) {
+	case 2: // Fermi
+		if (devProp.minor == 1) cores = mp * 48;
+		else cores = mp * 32;
+		break;
+	case 3: // Kepler
+		cores = mp * 192;
+		break;
+	case 5: // Maxwell
+		cores = mp * 128;
+		break;
+	case 6: // Pascal
+		if (devProp.minor == 1) cores = mp * 128;
+		else if (devProp.minor == 0) cores = mp * 64;
+		else printf("Unknown device type\n");
+		break;
+	default:
+		printf("Unknown device type\n");
+		break;
+	}
+	return cores;
 }
