@@ -1,100 +1,154 @@
-
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
-#include <stdio.h>
 #include <ctime>
+#include <stdio.h>
 #include <iostream>
 
 using namespace std;
 
-cudaError_t mulWithCuda(float *A, float *B, float *C, int size);
+const unsigned int arrsize = 160;
+const int BLOCK_SIZE = 16;
 
-__global__ void matrixMul(float *A, float *B, float *C, int size)
-{
-	unsigned __int16 i = threadIdx.x + blockIdx.x*blockDim.x;
-	unsigned __int16 j = threadIdx.y + blockIdx.y*blockDim.y;
-	float sum = 0.0;
+void initArr(double* arr, bool fill_with_zero);
+void multiplyMatrixes(double* firstArr, double* secondArr, double* finalArr);
+double sumArrayElems(double *arr);
 
-	for (unsigned __int16 k = 0; k < size; k++) {
-		sum += A[k + i*size] * B[j + k*size];
+
+//=================== GPU ===================
+__global__ void matrixmul_kernel(double *A, double *B, double *C) {
+	double sum = 0;
+
+	int row = blockIdx.y * blockDim.y + threadIdx.y;
+	int col = blockIdx.x * blockDim.x + threadIdx.x;
+	for (int k = 0; k < arrsize; k++) {
+		sum += A[row * arrsize + k] * B[k * arrsize + col];
 	}
 
-	C[j + i*size] = sum;
+	C[row * arrsize + col] = sum;
 }
 
-void initArray(float *arr, int size) {
-	for (int i = 0; i < size; i++)
-		arr[i] = rand() % 10;
-}
 
 int main()
 {
 	srand(time(0));
-	const int arraySize = 4;
-	float *A = new float[arraySize*arraySize];
-	float *B = new float[arraySize*arraySize];
-	float *C = new float[arraySize*arraySize];
 
-	initArray(A, arraySize*arraySize);
-	initArray(B, arraySize*arraySize);
+	double *A = new double[arrsize*arrsize];
+	double *B = new double[arrsize*arrsize];
+	double *C = new double[arrsize*arrsize];
 
-	// Add vectors in parallel.
-	cudaError_t cudaStatus = mulWithCuda(A, B, C, arraySize);
+	initArr(A, false);
+	initArr(B, false);
+	initArr(C, true);
 
-	// cudaDeviceReset must be called before exiting in order for profiling and
-	// tracing tools such as Nsight and Visual Profiler to show complete traces.
-	cudaStatus = cudaDeviceReset();
+	printf("The size of elems in A and B is %d x %d", arrsize, arrsize);
+	//=================== CPU //===================
+	cout << endl << "CPU" << endl;
 
-	for (int i = 0; i < arraySize*arraySize; i++) {
-		cout << C[i];
-	}
+	clock_t start_time = clock();
+	multiplyMatrixes(A, B, C);
+	clock_t end_time = clock();
+
+	cout << "Time: " << end_time - start_time << endl;
+	cout << "Sum of the elements after CPU concat: " << sumArrayElems(C) << endl;
+
+	//=================== GPU ===================
+	cout << endl << "GPU" << endl;
+
+	cudaEvent_t start, stop;
+	cudaEventCreate(&start);
+	cudaEventCreate(&stop);
+
+	size_t raw_size = arrsize * arrsize * sizeof(double);
+
+	double *aDevice = nullptr;
+	double *bDevice = nullptr;
+	double *cDevice = nullptr;
+
+	// Выделить память под 
+	cudaMalloc((void**)&aDevice, raw_size);
+	cudaMalloc((void**)&bDevice, raw_size);
+	cudaMalloc((void**)&cDevice, raw_size);
+
+	// Копировать массивы A и B в память GPU
+	cudaMemcpy(aDevice, A, raw_size, cudaMemcpyHostToDevice);
+	cudaMemcpy(bDevice, B, raw_size, cudaMemcpyHostToDevice);
+
+	dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
+	dim3 dimGrid((arrsize + dimBlock.x - 1) / dimBlock.x, (arrsize + dimBlock.y - 1) / dimBlock.y);
+
+	cudaEventRecord(start);
+	matrixmul_kernel <<<dimGrid, dimBlock>>> (aDevice, bDevice, cDevice);
+	cudaEventRecord(stop);
+
+	cudaEventSynchronize(stop);
+
+	cudaDeviceSynchronize();
+	cudaMemcpy(C, cDevice, raw_size, cudaMemcpyDeviceToHost);
+
+	float milliseconds = 0;
+	cudaEventElapsedTime(&milliseconds, start, stop);
+
+	cout << "Time: " << milliseconds << endl;
+	cout << "Sum of the elements after GPU concat: " << sumArrayElems(C) << endl;
+
+	// ==========================================
+	cudaFree(aDevice);
+	cudaFree(bDevice);
+	cudaFree(cDevice);
 
 	delete A;
 	delete B;
 	delete C;
 
 	system("pause");
-
 	return 0;
 }
 
-// Helper function for using CUDA to add vectors in parallel.
-cudaError_t mulWithCuda(float *A, float *B, float *C, int size)
+//=================== CPU ===================
+// Функция, которая принимает на вход массив и инициализирует его рандомными значениями
+void initArr(double* arr, bool fill_with_zero) {
+	if (fill_with_zero) {
+		for (int i = 0; i < arrsize*arrsize; i++)
+			arr[i] = 0;
+	}
+	else {
+		for (int i = 0; i < arrsize*arrsize; i++)
+			arr[i] = 2;// rand() % 10;
+	}
+
+}
+
+// Функция, которая складывает поэлементно два массива
+void multiplyMatrixes(double* firstArr, double* secondArr, double* finalArr) {
+
+	double row_sum = 0;
+	double column_sum = 0;
+	double sum = 0;
+
+	int final_array_index = 0;
+
+	// обходим каждую строку первой матрицы
+	for (int i = 0; i < arrsize; i++) {
+		// обходим каждый столбец второй матрицы
+		for (int j = 0; j < arrsize; j++) {
+			for (int k = 0; k < arrsize; k++) {
+				sum += firstArr[i*k] * secondArr[j*k];
+			}
+
+			finalArr[final_array_index] = sum;
+			sum = 0;
+			final_array_index++;
+		}
+	}
+}
+
+// Функция, которая находит сумму всех элементов в массиве
+double sumArrayElems(double* arr)
 {
-	float *dev_a = 0;
-	float *dev_b = 0;
-	float *dev_c = 0;
-	cudaError_t cudaStatus;
+	double sum = 0;
 
-	// Choose which GPU to run on, change this on a multi-GPU system.
-	cudaStatus = cudaSetDevice(0);
-
-	// Allocate GPU buffers for three vectors (two input, one output)    .
-	cudaStatus = cudaMalloc((void**)&dev_c, size * sizeof(int));
-
-	cudaStatus = cudaMalloc((void**)&dev_a, size * sizeof(int));
-
-	cudaStatus = cudaMalloc((void**)&dev_b, size * sizeof(int));
-
-	// Copy input vectors from host memory to GPU buffers.
-	cudaStatus = cudaMemcpy(dev_a, A, size * sizeof(int), cudaMemcpyHostToDevice);
-
-	cudaStatus = cudaMemcpy(dev_b, B, size * sizeof(int), cudaMemcpyHostToDevice);
-
-	// Launch a kernel on the GPU with one thread for each element.
-	matrixMul << <1, size >> > (dev_a, dev_b, dev_c, size);
-
-	// Check for any errors launching the kernel
-	cudaStatus = cudaGetLastError();
-
-	// cudaDeviceSynchronize waits for the kernel to finish, and returns
-	// any errors encountered during the launch.
-	cudaStatus = cudaDeviceSynchronize();
-
-	// Copy output vector from GPU buffer to host memory.
-	cudaStatus = cudaMemcpy(C, dev_c, size * sizeof(int), cudaMemcpyDeviceToHost);
-
-
-	return cudaStatus;
+	for (int i = 0; i < arrsize*arrsize; i++)
+		sum += arr[i];
+	return sum;
 }
