@@ -7,7 +7,7 @@
 
 using namespace std;
 
-const unsigned int arrsize = 160;
+const unsigned int arrsize = 144;
 const int BLOCK_SIZE = 16;
 
 void initArr(double* arr, bool fill_with_zero);
@@ -26,6 +26,46 @@ __global__ void matrixmul_kernel(double *A, double *B, double *C) {
 	}
 
 	C[row * arrsize + col] = sum;
+}
+
+//=================SHARED MEMORY=============
+__global__ void matrixMul_shm(double *A, double *B, double *C, size_t size)
+{
+	//Вычисляемый элемент матрицы C
+	double sum = 0.0;
+	//Индекс начала первой и последней подматриц A, обрабатываемой блоком
+	unsigned __int16 aBegin = size*BLOCK_SIZE*blockIdx.y;
+	unsigned __int16 aEnd = aBegin + size - 1;
+	//Шаг для вычисления индекса начала подматриц A
+	unsigned __int16 aStep = BLOCK_SIZE;
+	//Индекс начала первой подматрицы B, обрабатываемой блоком
+	unsigned __int16 bBegin = BLOCK_SIZE*blockIdx.x;
+	//Шаг для вычисления индекса начала подматриц B
+	unsigned __int16 bStep = BLOCK_SIZE*size;
+	//Цикл по 16*16 матрицам
+	for (unsigned __int16 ia = aBegin, ib = bBegin; ia <= aEnd; ia += aStep, ib += bStep)
+	{
+		//Очередная подматрица A в разделяемой памяти. Для размерности 16 каждая матрица будет занимать 1 Кб памяти.
+		__shared__ float As[BLOCK_SIZE][BLOCK_SIZE];
+		//Очередная подматрица B в разделяесмой памяти.
+		__shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE];
+		//Загрузить по одному элементу из A и B в разделяемую паямть
+		As[threadIdx.y][threadIdx.x] = A[ia + size*threadIdx.y + threadIdx.x];
+		Bs[threadIdx.y][threadIdx.x] = B[ib + size*threadIdx.y + threadIdx.x];
+		//Дождаться, когда обе подматрицы будут полностью загружены
+		__syncthreads();
+		//Вычисляем нужный элемент произведения загруженных подматриц
+		for (unsigned __int16 k = 0; k < BLOCK_SIZE; k++)
+		{
+			sum += As[threadIdx.y][k] * Bs[k][threadIdx.x];
+		}
+		//Дождаться, пока все остальные нити блока закончат вычислять свои элементы
+		__syncthreads();
+	}
+	//Расчитать смещение индекса для матртцы C
+	unsigned __int16 ic = size*BLOCK_SIZE*blockIdx.y + BLOCK_SIZE*blockIdx.x;
+	//Записать результат в глобальную память
+	C[ic + size*threadIdx.y + threadIdx.x] = sum;
 }
 
 
@@ -55,6 +95,8 @@ int main()
 	//=================== GPU ===================
 	cout << endl << "GPU" << endl;
 
+	initArr(C, true);
+
 	cudaEvent_t start, stop;
 	cudaEventCreate(&start);
 	cudaEventCreate(&stop);
@@ -75,7 +117,7 @@ int main()
 	cudaMemcpy(bDevice, B, raw_size, cudaMemcpyHostToDevice);
 
 	dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-	dim3 dimGrid((arrsize + dimBlock.x - 1) / dimBlock.x, (arrsize + dimBlock.y - 1) / dimBlock.y);
+	dim3 dimGrid(9, 9);
 
 	cudaEventRecord(start);
 	matrixmul_kernel <<<dimGrid, dimBlock>>> (aDevice, bDevice, cDevice);
@@ -91,6 +133,50 @@ int main()
 
 	cout << "Time: " << milliseconds << endl;
 	cout << "Sum of the elements after GPU concat: " << sumArrayElems(C) << endl;
+
+	cudaEventDestroy(start);
+	cudaEventDestroy(stop);
+
+
+	//=================SHARED MEMORY=============
+	cout << endl << "SHARED MEMORY" << endl;
+
+	cudaFuncSetCacheConfig(matrixMul_shm, cudaFuncCachePreferShared);
+
+	initArr(C, true);
+
+	double *aDeviceS = nullptr;
+	double *bDeviceS = nullptr;
+	double *cDeviceS = nullptr;
+
+	// Выделить память под 
+	cudaMalloc((void**)&aDeviceS, raw_size);
+	cudaMalloc((void**)&bDeviceS, raw_size);
+	cudaMalloc((void**)&cDeviceS, raw_size);
+
+	// Копировать массивы A и B в память GPU
+	cudaMemcpy(aDeviceS, A, raw_size, cudaMemcpyHostToDevice);
+	cudaMemcpy(bDeviceS, B, raw_size, cudaMemcpyHostToDevice);
+
+	cudaEvent_t startS, stopS;
+	cudaEventCreate(&startS);
+	cudaEventCreate(&stopS);
+
+	cudaEventRecord(startS);
+	//start_time = clock();
+	matrixMul_shm << <dimGrid, dimBlock >> > (aDeviceS, bDeviceS, cDeviceS, arrsize);
+	cudaEventRecord(stopS);
+
+	cudaEventSynchronize(stopS);
+
+	cudaDeviceSynchronize();
+	cudaMemcpy(C, cDeviceS, raw_size, cudaMemcpyDeviceToHost);
+
+	milliseconds = 0;
+	cudaEventElapsedTime(&milliseconds, startS, stopS);
+
+	cout << "Time: " << milliseconds << endl;
+	cout << "Sum of the elements after GPU concat (SHARED MEMORY): " << sumArrayElems(C) << endl;
 
 	// ==========================================
 	cudaFree(aDevice);
@@ -114,7 +200,8 @@ void initArr(double* arr, bool fill_with_zero) {
 	}
 	else {
 		for (int i = 0; i < arrsize*arrsize; i++)
-			arr[i] = 2;// rand() % 10;
+			//arr[i] = 2;
+			arr[i] = rand() % 10;
 	}
 
 }
